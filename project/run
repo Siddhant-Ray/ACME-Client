@@ -5,3 +5,4 @@ cd  "$DIRECTORY" || exit 1
 
 echo "Run your project here."
 echo "I can now push to the repo"
+echo "Set local git config"
