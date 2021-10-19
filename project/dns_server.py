@@ -34,6 +34,14 @@ class TCPServer(socketserver.TCPServer,socketserver.ThreadingMixIn,object):
             self.address_family = socket.AF_INET6
         super(TCPServer,self).__init__(server_address, handler)
 
+class UDPServer(socketserver.UDPServer,socketserver.ThreadingMixIn,object):
+    def __init__(self, server_address, handler):
+        self.allow_reuse_address = True
+        self.daemon_threads = True
+        if server_address[0] != '' and ':' in server_address[0]:
+            self.address_family = socket.AF_INET6
+        super(UDPServer,self).__init__(server_address, handler)
+
 class TestResolver:
 
     def __init__(self, domain, record):
@@ -62,11 +70,11 @@ if __name__ == '__main__':
     resolver = TestResolver(args.dir, args.record)
 
     logger = DNSLogger(prefix=False)
-    server = DNSServer(resolver, port = 10052, address="localhost", logger=logger, server = TCPServer)
+    server = DNSServer(resolver, port = 10053, address="localhost", logger=logger, server = UDPServer)
     server.start_thread()
 
     q = DNSRecord.question("https://example.com/dir")
-    a = q.send("localhost", 10052, tcp=True)
+    a = q.send("localhost", 10053, tcp=False)
 
     print(DNSRecord.parse(a))
 
