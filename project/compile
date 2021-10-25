@@ -4,3 +4,4 @@ echo "Compile your project here"
 pip3 install dnslib
 pip3 install requests
 pip3 install cryptography
+pip3 install flask 

@@ -1,38 +1,29 @@
-from http.server import SimpleHTTPRequestHandler, HTTPServer
-import socketserver
-import sys, argparse
+""" For reference used https://blog.miguelgrinberg.com/post/running-your-flask-application-over-https/page/2"""
+
+import flask
+import threading
+
+httpchallenge_server = flask.Flask(__name__)
 
 PORT = 5002
 
-parser = argparse.ArgumentParser()
-parser.add_argument('keyAuth')
-parser.add_argument('http_address')
+auths = {}
 
-args = parser.parse_args(sys.argv[1:])
+@httpchallenge_server.route('/.well-known/acme-challenge/<string:token>')
+# Check for authentic token, else exit
+def http_challenge(token):
+    if token in auths:
+        return flask.Response(auths[token], mimetype="application/octet-stream")
+    else:
+        flask.abort(404)
 
-keyAuth_list_addition = args.keyAuth.split('+')
-keyAs = []
-for key in keyAuth_list_addition:
-    if not key:
-        keyAs.append(key)
+def register_http_challenge(token, auth):
+    auths[token] = auth
 
-print(keyAs)
+# HTTP challenge server on PORT 5002
+def start_http_challenge_server():
+    # https://stackoverflow.com/questions/35244577/is-it-possible-to-use-an-inline-function-in-a-thread-call
+    server_thread = threading.Thread(target = lambda: httpchallenge_server.run(
+        host = "0.0.0.0", port = PORT , debug = False, threaded = True))
+    server_thread.start()
 
-class RequestHandler(SimpleHTTPRequestHandler):
-    def do_GET(self):
-
-        self.protocol_version = "HTTP/1.1"
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/octet-stream')
-        self.end_headers()
-
-        for single_key in keyAs:
-            kAuth = single_key
-            token = single_key.split('.')[0]
-            print(kAuth)
-            if self.path == ('/.well-known/acme-challenge/'+token):
-                self.wfile.write(bytes(kAuth, "utf8"))
-
-            
-httpd = HTTPServer((args.http_address, PORT), RequestHandler)
-httpd.serve_forever()
