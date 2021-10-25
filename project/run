@@ -12,7 +12,7 @@ then
     python3 dns_server.py $2 $3 $4 $5
 elif [ $1 = "http01" ]
 then
-    echo "http01 not yet done"
+    python3 httpchallenge_server.py $4 $5
 else 
     echo "enter a dns01 or http01 keyword first"
 fi

@@ -42,23 +42,25 @@ class UDPServer(socketserver.UDPServer,socketserver.ThreadingMixIn,object):
             self.address_family = socket.AF_INET6
         super(UDPServer,self).__init__(server_address, handler)
 
-class TestResolver:
+class DNSResolver:
 
-    def __init__(self, domain, record):
-
-        self.domain = domain
-        self.record  = record
+    def __init__(self, dns_response_list):
+        self.dns_response_list = dns_response_list
 
     def resolve(self, request, handler):
-        print(self.domain)
-        print(self.record)
-
-        #import ipdb;
-        #ipdb.set_trace()
-
+    
         reply = request.reply()
-        reply.add_answer(*RR.fromZone(str(self.domain)+ " 60 A " + str(self.record)))
+        for dns_result in self.dns_response_list:
+            reply.add_answer(*RR.fromZone(dns_result))
         return reply
+
+    def start(self):
+        print("Starting DNS server...")
+        self.server.start_thread()
+
+    def stop(self):
+        print("Stopping DNS server...")
+        self.server_close()
 
 if __name__ == '__main__':
 
@@ -66,17 +68,20 @@ if __name__ == '__main__':
     parser.add_argument("-d","--dir", help='pass the domain')
     parser.add_argument("-r","--record", help='IP record for resolving')
     args = parser.parse_args()
+
+    dns_response_list = args.dir
     
-    resolver = TestResolver(args.dir, args.record)
+    resolver = DNSResolver(dns_response_list)
 
     logger = DNSLogger(prefix=False)
-    server = DNSServer(resolver, port = 10053, address="localhost", logger=logger, server = UDPServer)
-    server.start_thread()
+    server = DNSServer(resolver, port = 10053, address="localhost", logger=logger)
+    server.start()
 
     q = DNSRecord.question("https://example.com/dir")
     a = q.send("localhost", 10053, tcp=False)
 
     print(DNSRecord.parse(a))
+    server.stop()
 
 
 
