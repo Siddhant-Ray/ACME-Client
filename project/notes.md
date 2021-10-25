@@ -7,6 +7,8 @@
 
 Fix DNS server, local testing still not working for DNS requests.
 Move shutdown server to within main script (Flask should make that possible). This reduces an additional thread needed?
+(solved)
 
+Check why "orders" key is not present in the account created!!
 
 

@@ -7,13 +7,5 @@ echo "Run your project here."
 echo "I can now push to the repo"
 echo "Set local git config"
 
-if [ $1 = "dns01" ]
-then
-    python3 dns_server.py $2 $3 $4 $5
-elif [ $1 = "http01" ]
-then
-    python3 httpchallenge_server.py $4 $5
-else 
-    echo "enter a dns01 or http01 keyword first"
-fi
+REQUESTS_CA_BUNDLE=pebble.minica.pem python3 main.py $@
 

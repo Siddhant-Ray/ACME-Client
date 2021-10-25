@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-
-"Code referenced from dnslib documentation"
+"Code referenced from dnslib documentation and source code"
 
 import argparse
 import datetime
@@ -19,71 +17,50 @@ except ImportError:
     import SocketServer as socketserver
 
 try:
-    from dnslib.server import DNSServer, DNSLogger, UDPServer
-    from dnslib.dns import RR, DNSRecord
+    from dnslib.server import DNSServer, DNSLogger
+    from dnslib.dns import RR, DNSRecord, QTYPE, A, TXT
 
 except ImportError:
     print("Missing dependency dnslib, Please install it with `pip`.")
     sys.exit(2)
 
-class TCPServer(socketserver.TCPServer,socketserver.ThreadingMixIn,object):
-    def __init__(self, server_address, handler):
-        self.allow_reuse_address = True
-        self.daemon_threads = True
-        if server_address[0] != '' and ':' in server_address[0]:
-            self.address_family = socket.AF_INET6
-        super(TCPServer,self).__init__(server_address, handler)
-
-class UDPServer(socketserver.UDPServer,socketserver.ThreadingMixIn,object):
-    def __init__(self, server_address, handler):
-        self.allow_reuse_address = True
-        self.daemon_threads = True
-        if server_address[0] != '' and ':' in server_address[0]:
-            self.address_family = socket.AF_INET6
-        super(UDPServer,self).__init__(server_address, handler)
-
 class DNSResolver:
 
-    def __init__(self, dns_response_list):
-        self.dns_response_list = dns_response_list
+    def __init__(self):
+        self.zone = []
+
+    def zone_add_A(self, domain, ip):
+        self.zone.append(RR(domain, QTYPE.A, rdata=A(ip), ttl=300))
+
+    def zone_add_TXT(self, domain, txt):
+        self.zone.append(RR(domain, QTYPE.TXT, rdata=TXT(txt), ttl=300))
 
     def resolve(self, request, handler):
-    
         reply = request.reply()
-        for dns_result in self.dns_response_list:
-            reply.add_answer(*RR.fromZone(dns_result))
+        for z in self.zone:
+            reply.add_answer(z)
+
         return reply
 
-    def start(self):
-        print("Starting DNS server...")
-        self.server.start_thread()
+class newDNSServer:
+    def __init__(self):
+        self.resolver = DNSResolver()
+        self.logger = DNSLogger("request,reply,truncated,error", False)
+        self.server = DNSServer(self.resolver, port=10053,
+                                logger=self.logger)
+                            
+    def zone_add_A(self, domain, ip):
+        self.resolver.zone_add_A(domain, ip)
 
-    def stop(self):
-        print("Stopping DNS server...")
-        self.server_close()
+    def zone_add_TXT(self, domain, txt):
+        self.resolver.zone_add_TXT(domain, txt)
 
-if __name__ == '__main__':
+    def server_start(self):
+        self.server_thread = threading.Thread(target=self.server.start)
+        self.server_thread.start()
 
-    parser = argparse.ArgumentParser(description='Run the DNS')
-    parser.add_argument("-d","--dir", help='pass the domain')
-    parser.add_argument("-r","--record", help='IP record for resolving')
-    args = parser.parse_args()
-
-    dns_response_list = args.dir
-    
-    resolver = DNSResolver(dns_response_list)
-
-    logger = DNSLogger(prefix=False)
-    server = DNSServer(resolver, port = 10053, address="localhost", logger=logger)
-    server.start()
-
-    q = DNSRecord.question("https://example.com/dir")
-    a = q.send("localhost", 10053, tcp=False)
-
-    print(DNSRecord.parse(a))
-    server.stop()
-
-
+    def server_stop(self):
+        self.server.stop()
 
 
 
