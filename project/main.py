@@ -17,24 +17,6 @@ from dns_server import newDNSServer
 from https_server import start_https_server
 from httpchallenge_server import start_http_challenge_server
 
-httpshutdown_server = flask.Flask(__name__)
-
-def kill_all_processes():
-    os._exit(0)
-
-@httpshutdown_server.route('/shutdown')
-def route_shutdown():
-    print("Shutting down...")
-
-    # https://stackoverflow.com/questions/15562446/how-to-stop-flask-application-without-using-ctrl-c
-
-    func = flask.request.environ.get('werkzeug.server.shutdown')
-    if func is None:
-        raise RuntimeError('Not running with the Werkzeug Server')
-    func()
-
-    return "Server shutting down"
-
 # https://www.programcreek.com/python/?CodeExample=generate+csr
 def generate_csr_key(domains):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -60,6 +42,7 @@ key_path = Path(__file__).parent.absolute()/ "key.pem"
 cert_path = Path(__file__).parent.absolute()/ "cert.pem"
 
 # write the cert and the pem file for the key  
+# https://stackoverflow.com/questions/56285000/python-cryptography-create-a-certificate-signed-by-an-existing-ca-and-export
 def write_certificates(key, cert):
     with open(key_path, "wb") as f:
         f.write(key.private_bytes(
@@ -71,25 +54,25 @@ def write_certificates(key, cert):
     with open(cert_path, "wb") as f:
         f.write(cert)
 
-
+# Wrapper for obtaining the certificate using ACME client methods 
 def obtain_certificate(args):
-    dns = newDNSServer()
+    dns_server = newDNSServer()
     start_http_challenge_server()
 
     for domain in args.domain:
-        dns.zone_add_A(domain, args.record)
+        dns_server.zone_add_A(domain, args.record)
 
-    dns.server_start()
+    dns_server.server_start()
     print("[Get certificate] DNS server started")
 
-    acme = ACMEClient(args.dir, dns)
+    acme = ACMEClient(args.dir, dns_server)
     if not acme:
-        print("Create client Error. Process killed.")
+        print("Create client error. Process killed.")
         return False, False
 
     directory = acme.get_directory()
     if not directory:
-        print("Get directory Error. Process killed.")
+        print("Get directory error. Process killed.")
         return False, False
 
     print("[Get directory]", directory)
@@ -101,61 +84,80 @@ def obtain_certificate(args):
 
     print("[Create account]", account)
 
-    cert_order, order_url = acme.issue_certificate(args.domain)
+    certificate_order, order_url = acme.issue_certificate(args.domain)
 
-    if not cert_order:
+    if not certificate_order:
         print("Certificate order error. Process killed.")
         return False, False
 
-    print("[Cert order]", cert_order)
+    print("[Certificate order]", certificate_order)
 
     validate_urls = []
-    finalize_url = cert_order["finalize"]
+    finalize_url = certificate_order["finalize"]
 
-    for auth in cert_order["authorizations"]:
-        cert_auth = acme.authorize_certificate(auth, args.challenge)
+    for auth in certificate_order["authorizations"]:
+        certificate_authorization = acme.authorize_certificate(auth, args.challenge)
 
-        if not cert_auth:
+        if not certificate_authorization:
             print("Certificate authentication error. Process killed")
             return False, False
-        validate_urls.append(cert_auth["url"])
+        validate_urls.append(certificate_authorization["url"])
 
-        print("[Cert auth]", cert_auth)
+        print("[Certificate authorization]", certificate_authorization)
 
     for url in validate_urls:
-        cert_valid = acme.validate_certificate(url)
+        certificate_valid = acme.validate_certificate(url)
 
-        if not cert_valid:
+        if not certificate_valid:
             print("Certificate validation error. Process killed")
             return False, False
 
-        print("[Cert valid]", cert_valid)
+        print("[Certificate validated]", certificate_valid)
 
     key, csr, der = generate_csr_key(args.domain)
 
-    cert_url = acme.finalize_certificate(order_url, finalize_url, der)
-    if not cert_url:
+    certificate_url = acme.finalize_certificate(order_url, finalize_url, der)
+    if not certificate_url:
         print("[Certificate finalizing error. Process killed")
         return False, False
 
-    print("[Cert finalize]", cert_url)
+    print("[Certificate finalize]", certificate_url)
 
-    cert = acme.download_certificate(cert_url)
+    downloaded_certificate = acme.download_certificate(certificate_url)
 
-    if not cert:
+    if not downloaded_certificate:
         print("Certificate downloading error. Process killed.")
         return False, False
 
-    print("[Cert download]", cert)
+    print("[Certificate for download]", downloaded_certificate)
 
-    write_certificates(key, cert)
+    write_certificates(key, downloaded_certificate)
 
-    crypto_cert = x509.load_pem_x509_certificate(cert)
+    crypto_certificate = x509.load_pem_x509_certificate(downloaded_certificate)
 
+    ## TODO Make sure revoke works, for some reason it failed a few tests 
     if args.revoke:
-        acme.revoke_certificate(crypto_cert.public_bytes(serialization.Encoding.DER))
+        acme.revoke_certificate(crypto_certificate.public_bytes(serialization.Encoding.DER))
 
-    return key, cert
+    return key, downloaded_certificate
+
+httpshutdown_server = flask.Flask(__name__)
+
+def kill_all_processes():
+    os._exit(0)
+
+@httpshutdown_server.route('/shutdown')
+def route_shutdown():
+    print("Shutting down...")
+
+    # https://stackoverflow.com/questions/15562446/how-to-stop-flask-application-without-using-ctrl-c
+
+    func = flask.request.environ.get('werkzeug.server.shutdown')
+    if func is None:
+        raise RuntimeError('Not running with the Werkzeug Server')
+    func()
+
+    return "Server shutting down"
 
 
 def start_server_to_use_cert(args):

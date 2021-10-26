@@ -56,12 +56,12 @@ class ACMEClient():
             {"User-Agent": "sidray-acme-project", "Content-Type": "application/jose+json"})
         self.jose_session.mount('https://', HTTPAdapter(max_retries=0))
 
-        print("Generating client keypair")
         self.generate_keypair()
         print("Client keypair generated")
 
 
     # Encode in B64 as per ACME RFC specification
+    # https://stackoverflow.com/questions/23164058/how-to-encode-text-to-base64-in-python
     def encode_b64(self, data):
         if isinstance(data, str):
             data = data.encode('utf-8')
@@ -106,6 +106,7 @@ class ACMEClient():
             return False
 
     # Split x and y coordinates : https://openid.net/specs/draft-jones-json-web-signature-04.html#DefiningECDSA
+    # https://pycryptodome.readthedocs.io/en/latest/src/public_key/ecc.html#Crypto.PublicKey.ECC.EccPoint
     def export_jwk(self):
         jwk_object = {
             "crv": "P-256",
@@ -189,17 +190,18 @@ class ACMEClient():
             "url": url
         }
 
-        header_enc = self.encode_b64(json.dumps(protected))
-        payload_enc = self.encode_b64(json.dumps(payload))
+        encoded_header = self.encode_b64(json.dumps(protected))
+        encoded_payload = self.encode_b64(json.dumps(payload))
 
+        # Create SHA thumbprint
         h = SHA256.new(str.encode("{}.{}".format(
-            header_enc, payload_enc), encoding="ascii"))
+            encoded_header, encoded_payload), encoding="ascii"))
 
         signature = self.signing_alg.sign(h)
 
         jose_object = {
-            "protected": header_enc,
-            "payload": payload_enc,
+            "protected": encoded_header,
+            "payload": encoded_payload,
             "signature": self.encode_b64(signature)
         }
 
@@ -223,26 +225,28 @@ class ACMEClient():
             "url": url
         }
 
-        header_enc = self.encode_b64(json.dumps(protected))
+        encoded_header = self.encode_b64(json.dumps(protected))
 
+        # Create SHA thumbprint
         if payload == "":
-            payload_enc = ""
+            encoded_payload = ""
             h = SHA256.new(str.encode(
-                "{}.".format(header_enc), encoding="ascii"))
+                "{}.".format(encoded_header), encoding="ascii"))
         else:
-            payload_enc = self.encode_b64(json.dumps(payload))
+            encoded_payload = self.encode_b64(json.dumps(payload))
             h = SHA256.new(str.encode("{}.{}".format(
-                header_enc, payload_enc), encoding="ascii"))
-        sig = self.signing_alg.sign(h)
+                encoded_header, encoded_payload), encoding="ascii"))
+        signature = self.signing_alg.sign(h)
 
         kid_jose_object = {
-            "protected": header_enc,
-            "payload": payload_enc,
-            "signature": self.encode_b64(sig)
+            "protected": encoded_header,
+            "payload": encoded_payload,
+            "signature": self.encode_b64(signature)
         }
 
         return kid_jose_object
 
+    # https://github.com/diafygi/acme-tiny/blob/master/acme_tiny.py
     def poll_resource_status(self, order_url, success_states, failure_states):
         while True:
             payload = ""
@@ -332,6 +336,7 @@ class ACMEClient():
                 response.status_code, response.json()))
             return False
 
+    # For finalising the certificate, wait till it is valid
     def finalize_certificate(self, order_url, finalize_url, der):
         jose_request_object = self.poll_resource_status(
             order_url, ["ready", "processing", "valid"], ["invalid"])
