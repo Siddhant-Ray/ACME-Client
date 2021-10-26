@@ -131,6 +131,7 @@ def obtain_certificate(args):
 
     print("[Certificate for download]", downloaded_certificate)
 
+    #Write certifcate and key to files, loaded later for use.
     write_certificates(key, downloaded_certificate)
 
     # https://cryptography.io/en/latest/x509/reference/
@@ -142,11 +143,26 @@ def obtain_certificate(args):
 
     return key, downloaded_certificate
 
-httpshutdown_server = flask.Flask(__name__)
-
+# Method to exit if no key found
 def kill_all_processes():
     os._exit(0)
 
+# Method to start https server to use the certificate
+def start_server_to_use_cert(args):
+    # Get certificate, however I will read the certificate from the stored file 
+    key, cert = obtain_certificate(args)
+
+    # THis still happens locally, because pebble rejects 5% of the nonces
+    if not key:
+        print("No key found, not starting the https server, killing all..")
+        kill_all_processes()
+
+    # Start HTTPS server
+    start_https_server(key_path, cert_path)
+
+
+# Shutdown server created inside the main script 
+httpshutdown_server = flask.Flask(__name__)
 @httpshutdown_server.route('/shutdown')
 def route_shutdown():
     print("Shutting down...")
@@ -160,21 +176,9 @@ def route_shutdown():
 
     return "Server shutting down"
 
-
-def start_server_to_use_cert(args):
-    # Get certificate, however I will read the certificate from the stored file 
-    key, cert = obtain_certificate(args)
-
-    # THis still happens locally, because pebble rejects 5% of the nonces
-    if not key:
-        print("No key found, not starting the https server, killing all..")
-        kill_all_processes()
-
-    # Start HTTPS server
-    start_https_server(key_path, cert_path)
-
 # Controller (still used to my SDN terminology haha) to initiate the certificate process, and start the https server at the end
 def controller(args):
+
     controller_thread = threading.Thread(target=lambda: httpshutdown_server.run(
         host="0.0.0.0", port=5003, debug=False, threaded=True))
     controller_thread.start()
@@ -188,8 +192,8 @@ def controller(args):
 
 def main():
     parser = argparse.ArgumentParser(description="sidray-acme-project wrapper")
-    parser.add_argument("--dir", help="the directory URL of the ACME server that should be used", required=True)
     parser.add_argument("challenge", choices=["dns01", "http01"])
+    parser.add_argument("--dir", help="the directory URL of the ACME server that should be used", required=True)
     parser.add_argument("--record", required=True, help="the IPv4 address which must be returned by your DNS server for all A-record queries")
     parser.add_argument("--domain", action="append", help="the domain for  which to request the certificate. If multiple --domain flags are present, a single certificate for multiple domains should be requested. Wildcard domains have no special flag and are simply denoted by, e.g., *.example.net")
     parser.add_argument("--revoke", action="store_true", help="Immediately revoke the certificate after obtaining it. In both cases, your application should start its HTTPS server and set it up to use the newly obtained certificate.")
