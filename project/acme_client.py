@@ -129,7 +129,6 @@ class ACMEClient():
         # 204 for no content
         if request.status_code == 200 or request.status_code == 204:
             self.nextNonce = request.headers["Replay-Nonce"]
-            print("Obtained next nonce, {}".format(self.nextNonce))
             return self.nextNonce
         else:
             print("get_nonce returned HTTP {} error. Response body: {}".format(
@@ -172,11 +171,9 @@ class ACMEClient():
     
 
     """The "jwk" and "kid" fields are mutually exclusive. Servers MUST
-        reject requests that contain both."""
+        reject requests that contain both.
     
-    """
-    All the new_accounts and revoke requests must be signed with jwk
-    """
+        All the new_accounts must be signed with jwk"""
 
     def create_jose_jwk(self, url, payload):
 
@@ -205,11 +202,7 @@ class ACMEClient():
 
         return jose_object
 
-
-    """
-    All other requests must be signed with the KID
-    """
-
+    """ Non new accounts signed with kid"""
     def create_jose_kid(self, url, payload):
 
         if not self.account_kid:
@@ -353,13 +346,14 @@ class ACMEClient():
         if response.status_code == 200:
             return response.content
 
-    
+    # Still confused whether kid or jwk must be used for revocation (read this again)
+    # For the moment kid works
 
     def revoke_certificate(self, certificate):
         payload = {
             "certificate": self.encode_b64(certificate)
         }
-        jose_payload = self.create_jose_jwk(self.revokeCert_url, payload)
+        jose_payload = self.create_jose_kid(self.revokeCert_url, payload)
 
         response = self.jose_session.post(self.revokeCert_url, json=jose_payload)
         if response.status_code == 200:

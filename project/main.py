@@ -65,26 +65,26 @@ def obtain_certificate(args):
     dns_server.server_start()
     print("[Get certificate] DNS server started")
 
-    acme = ACMEClient(args.dir, dns_server)
-    if not acme:
+    acme_client = ACMEClient(args.dir, dns_server)
+    if not acme_client:
         print("Create client error. Process killed.")
         return False, False
 
-    directory = acme.get_directory()
+    directory = acme_client.get_directory()
     if not directory:
         print("Get directory error. Process killed.")
         return False, False
 
     print("[Get directory]", directory)
 
-    account = acme.create_account()
+    account = acme_client.create_account()
     if not account:
         print("Create account error. Process killed.")
         return False, False
 
     print("[Create account]", account)
 
-    certificate_order, order_url = acme.issue_certificate(args.domain)
+    certificate_order, order_url = acme_client.issue_certificate(args.domain)
 
     if not certificate_order:
         print("Certificate order error. Process killed.")
@@ -96,7 +96,7 @@ def obtain_certificate(args):
     finalize_url = certificate_order["finalize"]
 
     for auth in certificate_order["authorizations"]:
-        certificate_authorization = acme.authorize_certificate(auth, args.challenge)
+        certificate_authorization = acme_client.authorize_certificate(auth, args.challenge)
 
         if not certificate_authorization:
             print("Certificate authentication error. Process killed")
@@ -106,7 +106,7 @@ def obtain_certificate(args):
         print("[Certificate authorization]", certificate_authorization)
 
     for url in validate_urls:
-        certificate_valid = acme.validate_certificate(url)
+        certificate_valid = acme_client.validate_certificate(url)
 
         if not certificate_valid:
             print("Certificate validation error. Process killed")
@@ -116,14 +116,14 @@ def obtain_certificate(args):
 
     key, csr, der = generate_csr_key(args.domain)
 
-    certificate_url = acme.finalize_certificate(order_url, finalize_url, der)
+    certificate_url = acme_client.finalize_certificate(order_url, finalize_url, der)
     if not certificate_url:
-        print("[Certificate finalizing error. Process killed")
+        print("Certificate finalizing error. Process killed")
         return False, False
 
     print("[Certificate finalize]", certificate_url)
 
-    downloaded_certificate = acme.download_certificate(certificate_url)
+    downloaded_certificate = acme_client.download_certificate(certificate_url)
 
     if not downloaded_certificate:
         print("Certificate downloading error. Process killed.")
@@ -133,11 +133,12 @@ def obtain_certificate(args):
 
     write_certificates(key, downloaded_certificate)
 
+    # https://cryptography.io/en/latest/x509/reference/
     crypto_certificate = x509.load_pem_x509_certificate(downloaded_certificate)
 
     ## TODO Make sure revoke works, for some reason it failed a few tests 
     if args.revoke:
-        acme.revoke_certificate(crypto_certificate.public_bytes(serialization.Encoding.DER))
+        acme_client.revoke_certificate(crypto_certificate.public_bytes(serialization.Encoding.DER))
 
     return key, downloaded_certificate
 
@@ -164,6 +165,7 @@ def start_server_to_use_cert(args):
     # Get certificate, however I will read the certificate from the stored file 
     key, cert = obtain_certificate(args)
 
+    # THis still happens locally, because pebble rejects 5% of the nonces
     if not key:
         print("No key found, not starting the https server, killing all..")
         kill_all_processes()
