@@ -37,6 +37,7 @@ class ACMEClient():
         self.newAccount_url = None
         self.newOrder_url = None
 
+        # Orders is not working
         self.account_orders = None
         self.account_kid = None
 
@@ -45,6 +46,10 @@ class ACMEClient():
 
         self.client_session = requests.Session()
         self.jose_session = requests.Session()
+
+        # For waiting states while finalizing the certificates
+        self.starting_success_states, self.starting_failure_states  = ["ready", "processing", "valid"], ["invalid"]
+        self.final_success_states, self.final_failure_states  = ["valid"], ["ready", "invalid", "pending"]
 
         #retry = Retry(connect=3, backoff_factor=0.5)
 
@@ -100,10 +105,6 @@ class ACMEClient():
             self.newOrder_url = jose_request_object["newOrder"]
             return jose_request_object
 
-        else:
-            print("get_directory returned HTTP {} error. Response body: {}".format(
-                directory_request.status_code, directory_request.json()))
-            return False
 
     # Split x and y coordinates : https://openid.net/specs/draft-jones-json-web-signature-04.html#DefiningECDSA
     # https://pycryptodome.readthedocs.io/en/latest/src/public_key/ecc.html#Crypto.PublicKey.ECC.EccPoint
@@ -168,10 +169,6 @@ class ACMEClient():
             self.account_kid = jose_request.headers["Location"]
 
             return jose_request_object
-        else:
-            print("create_account returned HTTP {} error. Response body: {}".format(
-                jose_request.status_code, jose_request.json()))
-            return False
     
 
     """The "jwk" and "kid" fields are mutually exclusive. Servers MUST
@@ -194,6 +191,7 @@ class ACMEClient():
         encoded_payload = self.encode_b64(json.dumps(payload))
 
         # Create SHA thumbprint
+        # https://pycryptodome.readthedocs.io/en/latest/src/hash/sha256.html
         h = SHA256.new(str.encode("{}.{}".format(
             encoded_header, encoded_payload), encoding="ascii"))
 
@@ -255,17 +253,16 @@ class ACMEClient():
             jose_request_object = jose_request.json()
 
             if jose_request.status_code == 200:
+
                 if jose_request_object["status"] in success_states:
                     print("Resource {} has {} state".format(
                         order_url, jose_request_object["status"]))
                     return jose_request_object
+
                 elif jose_request_object["status"] in failure_states:
                     print("Resource {} has {} state, treated as failure".format(
                         order_url, jose_request_object["status"]))
                     return False
-            else:
-                print("polling resource returned HTTP {} error. Response body: {}".format(
-                    jose_request.status_code, jose_request.json()))
 
             time.sleep(1)
 
@@ -283,10 +280,7 @@ class ACMEClient():
             jose_request_object = response.json()
 
             return jose_request_object, response.headers["Location"]
-        else:
-            print("certificate issue request has returned HTTP {} error. Response body: {}".format(
-                response.status_code, response.json()))
-            return False, False
+        
 
     def authorize_certificate(self, auth_url, auth_scheme):
         payload = ""
@@ -317,11 +311,6 @@ class ACMEClient():
                 auth_scheme, jose_request_object["challenges"]))
             return False
 
-        else:
-            print("challenge failed and returned HTTP {} error. Response body: {}".format(
-                request.status_code, request.json()))
-            return False
-
     def validate_certificate(self, validate_url):
         payload = {}
         jose_payload = self.create_jose_kid(validate_url, payload)
@@ -331,15 +320,11 @@ class ACMEClient():
             jose_request_object = response.json()
 
             return jose_request_object
-        else:
-            print("validating certificate failed,  returned HTTP {} error. Response body: {}".format(
-                response.status_code, response.json()))
-            return False
-
+        
     # For finalising the certificate, wait till it is valid
     def finalize_certificate(self, order_url, finalize_url, der):
         jose_request_object = self.poll_resource_status(
-            order_url, ["ready", "processing", "valid"], ["invalid"])
+            order_url, self.starting_success_states, self.starting_failure_states)
 
         if not jose_request_object:
             return False
@@ -353,43 +338,33 @@ class ACMEClient():
 
         if response.status_code == 200:
             jose_request_object = self.poll_resource_status(
-                order_url, ["valid"], ["ready", "invalid", "pending"])
+                order_url, self.final_success_states, self.final_failure_states)
             if jose_request_object:
                 return jose_request_object["certificate"]
             else:
                 return False
-        else:
-            print("finalize certificate request failed, returned HTTP {} error. Response body: {}".format(
-                response.status_code, response.json()))
-            return False
+        
 
-    def download_certificate(self, cert_url):
+    def download_certificate(self, certificate_url):
         payload = ""
-        jose_payload = self.create_jose_kid(cert_url, payload)
+        jose_payload = self.create_jose_kid(certificate_url, payload)
 
-        response = self.jose_session.post(cert_url, json=jose_payload)
+        response = self.jose_session.post(certificate_url, json=jose_payload)
         if response.status_code == 200:
             return response.content
 
-        else:
-            print("downloading certifcate failed, returned HTTP {} error. Response body: {}".format(
-                response.status_code, response.json()))
-            return False
+    
 
-    def revoke_certificate(self, cert):
+    def revoke_certificate(self, certificate):
         payload = {
-            "certificate": self.encode_b64(cert)
+            "certificate": self.encode_b64(certificate)
         }
-        jose_payload = self.create_jose_kid(self.revokeCert_url, payload)
+        jose_payload = self.create_jose_jwk(self.revokeCert_url, payload)
 
         response = self.jose_session.post(self.revokeCert_url, json=jose_payload)
         if response.status_code == 200:
             return response.content
 
-        else:
-            print("revoking certificate failed, returned HTTP {} error. Response body: {}".format(
-                response.status_code, response.json()))
-            return False
-
+        
 
 
