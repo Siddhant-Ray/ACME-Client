@@ -2,6 +2,7 @@
 
 import flask
 import threading
+import subprocess
 
 httpchallenge_server = flask.Flask(__name__)
 
@@ -26,4 +27,14 @@ def start_http_challenge_server():
     server_thread = threading.Thread(target = lambda: httpchallenge_server.run(
         host = "0.0.0.0", port = PORT , debug = False, threaded = True))
     server_thread.start()
+
+    '''server_thread = subprocess.run(httpchallenge_server.run(
+        host = "0.0.0.0", port = PORT , debug = False, threaded = True))
+
+    return server_thread'''
+
+
+
+
+    
 
