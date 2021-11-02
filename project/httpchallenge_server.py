@@ -10,6 +10,11 @@ PORT = 5002
 
 auths = {}
 
+"""
+    Let’s Encrypt gives a token to your ACME client, and your ACME client puts a file on your web server at
+    http://<YOUR_DOMAIN>/.well-known/acme-challenge/<TOKEN>.
+    That file contains the token, plus a thumbprint of your account key.
+"""
 @httpchallenge_server.route('/.well-known/acme-challenge/<string:token>')
 # Check for authentic token, else exit
 def http_challenge(token):

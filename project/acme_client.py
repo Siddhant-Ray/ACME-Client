@@ -9,8 +9,6 @@ from datetime import datetime, timedelta, timezone
 
 from httpchallenge_server import register_http_challenge
 
-from requests.models import Response
-
 from Crypto.PublicKey import ECC
 from Crypto.Signature import DSS
 from Crypto.Hash import SHA256
@@ -20,7 +18,8 @@ try:
 except ImportError:
     print("error in importing requests, install with pip")
     sys.exit(2)  
-
+    
+from requests.models import Response
 from requests.adapters import HTTPAdapter  
 from requests.packages.urllib3.util.retry import Retry
 
@@ -37,8 +36,6 @@ class ACMEClient():
         self.newAccount_url = None
         self.newOrder_url = None
 
-        # Orders is not working
-        self.account_orders = None
         self.account_kid = None
 
         self.key = None
@@ -64,14 +61,6 @@ class ACMEClient():
         self.generate_keypair()
         print("Client keypair generated")
 
-
-    # Encode in B64 as per ACME RFC specification
-    # https://stackoverflow.com/questions/23164058/how-to-encode-text-to-base64-in-python
-    def encode_b64(self, data):
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-        return base64.urlsafe_b64encode(data).decode('utf-8').rstrip("=")
-    
     # Used the pycryptodome documentation 
     # https://pycryptodome.readthedocs.io/en/latest/src/public_key/#available-key-types
 
@@ -89,10 +78,16 @@ class ACMEClient():
 
         self.signing_alg = DSS.new(self.key, "fips-186-3")
 
+    # Encode in B64 as per ACME RFC specification
+    # https://stackoverflow.com/questions/23164058/how-to-encode-text-to-base64-in-python
+    def encode_b64(self, data):
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        return base64.urlsafe_b64encode(data).decode('utf-8').rstrip("=")
+    
     # Get the values from the root ACME directory
     def get_directory(self):
 
-        
         directory_request = self.client_session.get(self.directory)
     
         # Request code 200 for directory
@@ -108,7 +103,7 @@ class ACMEClient():
 
     # Split x and y coordinates : https://openid.net/specs/draft-jones-json-web-signature-04.html#DefiningECDSA
     # https://pycryptodome.readthedocs.io/en/latest/src/public_key/ecc.html#Crypto.PublicKey.ECC.EccPoint
-    def export_jwk(self):
+    def create_jwk_object(self):
         jwk_object = {
             "crv": "P-256",
             "kid": "1",
@@ -130,10 +125,6 @@ class ACMEClient():
         if request.status_code == 200 or request.status_code == 204:
             self.nextNonce = request.headers["Replay-Nonce"]
             return self.nextNonce
-        else:
-            print("get_nonce returned HTTP {} error. Response body: {}".format(
-                request.status_code, request.json()))
-            return None
 
     def create_key_authorization(self, token):
         key = {
@@ -143,12 +134,13 @@ class ACMEClient():
             "y": self.encode_b64(self.key.pointQ.y.to_bytes()),
         }
 
-        h = self.encode_b64(SHA256.new(str.encode(
+        hash_val = self.encode_b64(SHA256.new(str.encode(
             json.dumps(key, separators=(',', ':')), encoding="utf-8")).digest())
-        key_auth = "{}.{}".format(token, h)
+        key_auth = "{}.{}".format(token, hash_val)
 
         return key_auth
 
+    # Method to create the account 
     def create_account(self):
         payload = {
             "termsOfServiceAgreed": True,
@@ -161,10 +153,6 @@ class ACMEClient():
         if jose_request.status_code == 201:
             jose_request_object = jose_request.json()
 
-
-            ## TODO : account orders missing for now, need to investigate why not working 
-
-            #self.account_orders = jose_request_object["orders"]
             self.account_kid = jose_request.headers["Location"]
 
             return jose_request_object
@@ -179,7 +167,7 @@ class ACMEClient():
 
         protected = {
             "alg": "ES256",
-            "jwk": self.export_jwk(),
+            "jwk": self.create_jwk_object(),
             "nonce": self.get_nonce(),
             "url": url
         }
@@ -189,10 +177,10 @@ class ACMEClient():
 
         # Create SHA thumbprint
         # https://pycryptodome.readthedocs.io/en/latest/src/hash/sha256.html
-        h = SHA256.new(str.encode("{}.{}".format(
+        hash_val = SHA256.new(str.encode("{}.{}".format(
             encoded_header, encoded_payload), encoding="ascii"))
 
-        signature = self.signing_alg.sign(h)
+        signature = self.signing_alg.sign(hash_val)
 
         jose_object = {
             "protected": encoded_header,
@@ -204,10 +192,6 @@ class ACMEClient():
 
     """ Non new accounts signed with kid"""
     def create_jose_kid(self, url, payload):
-
-        if not self.account_kid:
-            print("No account kid found")
-            return None
 
         protected = {
             "alg": "ES256",
@@ -221,13 +205,13 @@ class ACMEClient():
         # Create SHA thumbprint
         if payload == "":
             encoded_payload = ""
-            h = SHA256.new(str.encode(
+            hash_val = SHA256.new(str.encode(
                 "{}.".format(encoded_header), encoding="ascii"))
         else:
             encoded_payload = self.encode_b64(json.dumps(payload))
-            h = SHA256.new(str.encode("{}.{}".format(
+            hash_val = SHA256.new(str.encode("{}.{}".format(
                 encoded_header, encoded_payload), encoding="ascii"))
-        signature = self.signing_alg.sign(h)
+        signature = self.signing_alg.sign(hash_val)
 
         kid_jose_object = {
             "protected": encoded_header,
@@ -236,6 +220,61 @@ class ACMEClient():
         }
 
         return kid_jose_object
+
+    def issue_certificate(self, domains, begin=datetime.now(timezone.utc), duration=timedelta(days=365)):
+        payload = {
+            "identifiers": [{"type": "dns", "value": domain} for domain in domains],
+            "notBefore": begin.isoformat(),
+            "notAfter": (begin + duration).isoformat()
+        }
+
+        jose_payload = self.create_jose_kid(self.newOrder_url, payload)
+        response = self.jose_session.post(self.newOrder_url, json=jose_payload)
+
+        if response.status_code == 201:
+            jose_request_object = response.json()
+
+            return jose_request_object, response.headers["Location"]
+
+    def authorize_certificate(self, auth_url, auth_scheme):
+        payload = ""
+
+        jose_payload = self.create_jose_kid(auth_url, payload)
+        request = self.jose_session.post(auth_url, json=jose_payload)
+
+        if request.status_code == 200:
+            jose_request_object = request.json()
+
+            for challenge in jose_request_object["challenges"]:
+                key_auth = self.create_key_authorization(challenge["token"])
+
+                if auth_scheme == "dns01" and challenge["type"] == "dns-01":
+                    key_auth = self.encode_b64(SHA256.new(
+                        str.encode(key_auth, encoding="ascii")).digest())
+
+                    """ For example, if the domain name being validated is
+                    "www.example.org", then the client would provision the following DNS
+                    record:
+                    _acme-challenge.www.example.org. 300 IN TXT "gfj9Xq...Rg85nM"""
+
+                    self.dns_server.zone_add_TXT(
+                        "_acme-challenge.{}".format(jose_request_object["identifier"]["value"]), key_auth)
+                    return challenge
+
+                elif auth_scheme == "http01" and challenge["type"] == "http-01":
+                    register_http_challenge(challenge["token"], key_auth)
+                    return challenge
+
+    # Validate the certificate after the challenge
+    def validate_certificate(self, validate_url):
+        payload = {}
+        jose_payload = self.create_jose_kid(validate_url, payload)
+        response = self.jose_session.post(validate_url, json=jose_payload)
+
+        if response.status_code == 200:
+            jose_request_object = response.json()
+
+            return jose_request_object
 
     # https://github.com/diafygi/acme-tiny/blob/master/acme_tiny.py
     def poll_resource_status(self, order_url, success_states, failure_states):
@@ -258,63 +297,8 @@ class ACMEClient():
                     return False
 
             time.sleep(1)
-
-    def issue_certificate(self, domains, begin=datetime.now(timezone.utc), duration=timedelta(days=365)):
-        payload = {
-            "identifiers": [{"type": "dns", "value": domain} for domain in domains],
-            "notBefore": begin.isoformat(),
-            "notAfter": (begin + duration).isoformat()
-        }
-
-        jose_payload = self.create_jose_kid(self.newOrder_url, payload)
-        response = self.jose_session.post(self.newOrder_url, json=jose_payload)
-
-        if response.status_code == 201:
-            jose_request_object = response.json()
-
-            return jose_request_object, response.headers["Location"]
         
-
-    def authorize_certificate(self, auth_url, auth_scheme):
-        payload = ""
-
-        jose_payload = self.create_jose_kid(auth_url, payload)
-
-        request = self.jose_session.post(auth_url, json=jose_payload)
-
-        if request.status_code == 200:
-            jose_request_object = request.json()
-
-            for challenge in jose_request_object["challenges"]:
-                key_auth = self.create_key_authorization(challenge["token"])
-
-                if auth_scheme == "dns01" and challenge["type"] == "dns-01":
-                    key_auth = self.encode_b64(SHA256.new(
-                        str.encode(key_auth, encoding="ascii")).digest())
-
-                    self.dns_server.zone_add_TXT(
-                        "_acme-challenge.{}".format(jose_request_object["identifier"]["value"]), key_auth)
-                    return challenge
-
-                elif auth_scheme == "http01" and challenge["type"] == "http-01":
-                    register_http_challenge(challenge["token"], key_auth)
-                    return challenge
-
-            print("Valid challenge not found for scheme {} in ACME server response: {}".format(
-                auth_scheme, jose_request_object["challenges"]))
-            return False
-
-    def validate_certificate(self, validate_url):
-        payload = {}
-        jose_payload = self.create_jose_kid(validate_url, payload)
-        response = self.jose_session.post(validate_url, json=jose_payload)
-
-        if response.status_code == 200:
-            jose_request_object = response.json()
-
-            return jose_request_object
-        
-    # For finalising the certificate, wait till it is valid
+    # For finalising the certificate, wait till it is valid (use the polling function)
     def finalize_certificate(self, order_url, finalize_url, der):
         jose_request_object = self.poll_resource_status(
             order_url, self.starting_success_states, self.starting_failure_states)
@@ -337,7 +321,7 @@ class ACMEClient():
             else:
                 return False
         
-
+    # Download the certifcate after finalizing
     def download_certificate(self, certificate_url):
         payload = ""
         jose_payload = self.create_jose_kid(certificate_url, payload)
@@ -348,7 +332,6 @@ class ACMEClient():
 
     # Still confused whether kid or jwk must be used for revocation (read this again)
     # For the moment kid works
-
     def revoke_certificate(self, certificate):
         payload = {
             "certificate": self.encode_b64(certificate)

@@ -16,7 +16,7 @@ def route_get():
 def start_https_server(key_path, cert_path):
     context = (cert_path, key_path)
 
-    ## TODO: Try to make it work with subprocess
+    ## TODO: Try to make it work with subprocess (but threads is working fine)
 
     # https://stackoverflow.com/questions/35244577/is-it-possible-to-use-an-inline-function-in-a-thread-call
     server_thread = threading.Thread(target = lambda: https_server.run(
