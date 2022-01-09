@@ -13,8 +13,8 @@ Before running the project, GO must be installed and added to path.
 
 Running example : 
 
-### | Input and Output
-#### | File layout
+### Input and Output
+#### File layout
 We will supply you with a basic skeleton which you should use for submission. Three files in this skeleton are of particular importance:
 - `pebble.minica.pem`
 This is the CA certificate for the private key used to sign the certificate of the HTTPS endpoint of the ACME server itself. Use this as a trust root to check the ACME server's certificate when interacting with this endpoint. You will lose points if your application sends more than one request to an ACME server with an invalid certificate (one request is needed to obtain the certificate and check its validity).
